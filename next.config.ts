@@ -9,6 +9,14 @@ const nextConfig: NextConfig = {
   turbopack: {
     root: projectRoot,
   },
+  serverExternalPackages: [
+    "@remotion/renderer",
+    "@remotion/compositor-linux-x64-gnu",
+    "@remotion/compositor-linux-x64-musl",
+    "@remotion/compositor-linux-arm64-gnu",
+    "@remotion/compositor-linux-arm64-musl",
+    "remotion",
+  ],
   experimental: {
     serverActions: {
       bodySizeLimit: "600mb",

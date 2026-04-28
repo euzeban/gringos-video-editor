@@ -108,8 +108,11 @@ export async function POST(
       tusError = `TUS create failed: ${createResp.status} ${await createResp.text()}`;
     } else {
       const location = createResp.headers.get("Location")!;
-      // Supabase returns a relative or absolute location — normalise to full URL
-      const uploadUrl = location.startsWith("http") ? location : `${storageBase}${location}`;
+      // Supabase returns http://...:8000/upload/resumable/{id} (internal Kong port).
+      // Normalise to the public HTTPS URL so PATCH requests go through Traefik,
+      // where each 6 MB chunk body is within the body-size limit.
+      const uploadIdMatch = location.match(/\/upload\/resumable\/(.+)$/);
+      const uploadUrl = `${storageBase}/storage/v1/upload/resumable/${uploadIdMatch?.[1] ?? ""}`;
 
       // Step 2: send file in TUS chunks
       const fd = fs.openSync(assembledPath, "r");

@@ -10,12 +10,22 @@ const nextConfig: NextConfig = {
     root: projectRoot,
   },
   serverExternalPackages: [
+    "remotion",
     "@remotion/renderer",
+    "@remotion/bundler",
     "@remotion/compositor-linux-x64-gnu",
     "@remotion/compositor-linux-x64-musl",
     "@remotion/compositor-linux-arm64-gnu",
     "@remotion/compositor-linux-arm64-musl",
-    "remotion",
+    "@remotion/compositor-win32-x64-msvc",
+    "@remotion/compositor-darwin-x64",
+    "@remotion/compositor-darwin-arm64",
+    "esbuild",
+    "@esbuild/linux-x64",
+    "@esbuild/linux-arm64",
+    "@esbuild/darwin-x64",
+    "@esbuild/darwin-arm64",
+    "@esbuild/win32-x64",
   ],
   experimental: {
     serverActions: {

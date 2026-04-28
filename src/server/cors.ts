@@ -3,7 +3,7 @@ import { NextResponse } from "next/server";
 const headers = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type",
+  "Access-Control-Allow-Headers": "Content-Type, X-Chunk-Index, X-Total-Chunks, X-Created-By, X-Content-Type",
 };
 
 export const withCors = (response: NextResponse) => {

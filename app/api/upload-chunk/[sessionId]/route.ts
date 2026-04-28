@@ -75,21 +75,85 @@ export async function POST(
     return withCors(NextResponse.json({ error: "Failed to create job" }, { status: 500 }));
   }
 
-  // Upload assembled file to Supabase Storage
+  // Upload assembled file to Supabase Storage via TUS resumable upload.
+  // Each TUS PATCH is 6 MB — small enough to bypass Traefik's body-size limit,
+  // which would reject the full assembled file (100+ MB) in a single POST.
   const supabasePath = `raw/${job.id}.${ext}`;
-  const fileBuffer = fs.readFileSync(assembledPath);
-  fs.unlinkSync(assembledPath);
+  const fileSize = fs.statSync(assembledPath).size;
+  const TUS_CHUNK = 6 * 1024 * 1024; // 6 MB
+  const storageBase = process.env.SUPABASE_URL!;
+  const authHeader = `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY!}`;
 
-  const { error: uploadError } = await supabase.storage
-    .from("gringos-videos")
-    .upload(supabasePath, fileBuffer, { contentType, upsert: true });
+  let tusError: string | null = null;
+  try {
+    // Step 1: create the resumable upload
+    const createResp = await fetch(`${storageBase}/storage/v1/upload/resumable`, {
+      method: "POST",
+      headers: {
+        Authorization: authHeader,
+        "Content-Length": "0",
+        "Upload-Length": String(fileSize),
+        "Tus-Resumable": "1.0.0",
+        "Upload-Metadata": [
+          `bucketName ${Buffer.from("gringos-videos").toString("base64")}`,
+          `objectName ${Buffer.from(supabasePath).toString("base64")}`,
+          `contentType ${Buffer.from(contentType).toString("base64")}`,
+          `cacheControl ${Buffer.from("3600").toString("base64")}`,
+        ].join(","),
+        "x-upsert": "true",
+      },
+    });
 
-  if (uploadError) {
+    if (!createResp.ok) {
+      tusError = `TUS create failed: ${createResp.status} ${await createResp.text()}`;
+    } else {
+      const location = createResp.headers.get("Location")!;
+      // Supabase returns a relative or absolute location — normalise to full URL
+      const uploadUrl = location.startsWith("http") ? location : `${storageBase}${location}`;
+
+      // Step 2: send file in TUS chunks
+      const fd = fs.openSync(assembledPath, "r");
+      let offset = 0;
+      try {
+        while (offset < fileSize) {
+          const chunkSize = Math.min(TUS_CHUNK, fileSize - offset);
+          const chunk = Buffer.alloc(chunkSize);
+          fs.readSync(fd, chunk, 0, chunkSize, offset);
+
+          const patchResp = await fetch(uploadUrl, {
+            method: "PATCH",
+            headers: {
+              Authorization: authHeader,
+              "Content-Type": "application/offset+octet-stream",
+              "Content-Length": String(chunkSize),
+              "Upload-Offset": String(offset),
+              "Tus-Resumable": "1.0.0",
+            },
+            body: chunk,
+          });
+
+          if (!patchResp.ok) {
+            tusError = `TUS patch failed at offset ${offset}: ${patchResp.status} ${await patchResp.text()}`;
+            break;
+          }
+          offset += chunkSize;
+        }
+      } finally {
+        fs.closeSync(fd);
+      }
+    }
+  } catch (err) {
+    tusError = err instanceof Error ? err.message : String(err);
+  } finally {
+    fs.existsSync(assembledPath) && fs.unlinkSync(assembledPath);
+  }
+
+  if (tusError) {
     await supabase
       .from("video_jobs")
-      .update({ status: "error", error_message: uploadError.message, updated_at: new Date().toISOString() })
+      .update({ status: "error", error_message: tusError, updated_at: new Date().toISOString() })
       .eq("id", job.id);
-    return withCors(NextResponse.json({ error: uploadError.message }, { status: 500 }));
+    return withCors(NextResponse.json({ error: tusError }, { status: 500 }));
   }
 
   const { data: urlData } = supabase.storage.from("gringos-videos").getPublicUrl(supabasePath);

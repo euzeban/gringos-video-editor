@@ -34,8 +34,33 @@ RUN npm run build
 # ── Stage 3: imagem final ────────────────────────────────────────────────────
 FROM node:20-slim AS runner
 
-# ffmpeg como fallback caso ffmpeg-static não consiga rodar (raramente necessário)
-RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg && rm -rf /var/lib/apt/lists/*
+# ffmpeg (extração de áudio) + bibliotecas de sistema do Chromium (render Remotion).
+# O chrome-headless-shell não sobe sem essas libs (libnspr4.so, libnss3, libgbm...).
+RUN apt-get update && apt-get install -y --no-install-recommends \
+  ffmpeg \
+  libnss3 \
+  libnspr4 \
+  libdbus-1-3 \
+  libatk1.0-0 \
+  libatk-bridge2.0-0 \
+  libcups2 \
+  libdrm2 \
+  libgbm1 \
+  libasound2 \
+  libpango-1.0-0 \
+  libcairo2 \
+  libxkbcommon0 \
+  libxcomposite1 \
+  libxdamage1 \
+  libxfixes3 \
+  libxrandr2 \
+  libxext6 \
+  libx11-6 \
+  libxcb1 \
+  libxshmfence1 \
+  libatspi2.0-0 \
+  fonts-liberation \
+  && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 ENV NODE_ENV=production

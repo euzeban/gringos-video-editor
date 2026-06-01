@@ -51,6 +51,11 @@ COPY --from=builder /app/public ./public
 # Necessário para o render do Remotion (bundle do entryPoint src/index.ts em runtime)
 COPY --from=builder /app/src ./src
 COPY --from=builder /app/remotion.config.ts ./remotion.config.ts
+COPY --from=builder /app/package.json ./package.json
+# Remotion (bundler/renderer/webpack/esbuild) NÃO é rastreado pelo build standalone
+# do Next → a rota /render crashava na importação (500 puro). Sobrepõe o node_modules
+# completo (superset do mínimo do standalone) para o Remotion carregar em runtime.
+COPY --from=builder /app/node_modules ./node_modules
 
 EXPOSE 3004
 ENV PORT=3004

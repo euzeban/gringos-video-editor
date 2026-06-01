@@ -40,11 +40,17 @@ RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg && rm -r
 WORKDIR /app
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
+# Usa o ffmpeg do sistema (instalado acima) — o ffmpeg-static não sobrevive ao
+# build standalone do Next (binário não rastreado). Resolve o erro ENOENT no /process.
+ENV FFMPEG_PATH=/usr/bin/ffmpeg
 
 # Standalone output inclui server.js + node_modules mínimos
 COPY --from=builder /app/.next/standalone ./
 COPY --from=builder /app/.next/static ./.next/static
 COPY --from=builder /app/public ./public
+# Necessário para o render do Remotion (bundle do entryPoint src/index.ts em runtime)
+COPY --from=builder /app/src ./src
+COPY --from=builder /app/remotion.config.ts ./remotion.config.ts
 
 EXPOSE 3004
 ENV PORT=3004

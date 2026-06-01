@@ -43,7 +43,12 @@ export async function POST(req: NextRequest) {
     const videoBuffer = Buffer.from(await videoRes.arrayBuffer());
     fs.writeFileSync(videoPath, videoBuffer);
 
-    const ffmpeg = ffmpegPath ?? "ffmpeg";
+    // ffmpeg-static pode não existir no build standalone do Next (o binário não é
+    // rastreado). Preferimos FFMPEG_PATH, depois o estático SE o arquivo existir,
+    // por fim o ffmpeg do sistema (instalado via apt no Dockerfile, no PATH).
+    const ffmpeg =
+      process.env.FFMPEG_PATH ||
+      (ffmpegPath && fs.existsSync(ffmpegPath) ? ffmpegPath : "ffmpeg");
     execFileSync(ffmpeg, ["-i", videoPath, "-vn", "-ar", "16000", "-ac", "1", "-b:a", "64k", audioPath, "-y"], {
       stdio: "pipe",
     });

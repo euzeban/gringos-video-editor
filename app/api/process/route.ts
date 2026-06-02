@@ -116,11 +116,55 @@ export async function POST(req: NextRequest) {
       0,
     );
 
+    // ── FASE 1b: CORTA + JUNTA no servidor (ffmpeg) → vídeo ÚNICO contínuo ──────
+    // Resolve o "pisca preto": o silêncio sai do ARQUIVO (não é pulado no player).
+    // Se o corte falhar, cai no modo Series (segmentos) — ainda funciona.
+    let finalVideoUrl = rawVideoUrl;
+    let finalSegments: Seg[] = segments;
+    const compressedMs = acc;
+    const shouldCut = captions.length > 0 && segments.length > 0 && compressedMs < totalDurationMs - 100;
+
+    if (shouldCut) {
+      try {
+        const sec = (ms: number) => (ms / 1000).toFixed(3);
+        // aspas simples são quoting do PRÓPRIO ffmpeg (protege as vírgulas do between)
+        const ranges = segments.map((s) => `between(t,${sec(s.startMs)},${sec(s.endMs)})`).join("+");
+        const cutPath = path.join(tmpDir, `${jobId}-cut.mp4`);
+        execFileSync(
+          ffmpeg,
+          [
+            "-i", videoPath,
+            "-vf", `select='${ranges}',setpts=N/FRAME_RATE/TB`,
+            "-af", `aselect='${ranges}',asetpts=N/SR/TB`,
+            "-r", String(FPS),
+            "-c:v", "libx264", "-preset", "veryfast", "-crf", "23", "-pix_fmt", "yuv420p",
+            "-c:a", "aac", "-b:a", "128k",
+            "-movflags", "+faststart",
+            "-y", cutPath,
+          ],
+          { stdio: "pipe", maxBuffer: 1024 * 1024 * 128 },
+        );
+        const cutBuffer = fs.readFileSync(cutPath);
+        const cutStoragePath = `cuts/${jobId}.mp4`;
+        const { error: upErr } = await supabase.storage
+          .from("gringos-videos")
+          .upload(cutStoragePath, cutBuffer, { contentType: "video/mp4", upsert: true });
+        if (upErr) throw new Error(upErr.message);
+        finalVideoUrl = supabase.storage.from("gringos-videos").getPublicUrl(cutStoragePath).data.publicUrl;
+        finalSegments = []; // vídeo já contínuo → composição usa 1 OffthreadVideo (sem Series, sem preto)
+        if (fs.existsSync(cutPath)) fs.unlinkSync(cutPath);
+      } catch (cutErr) {
+        console.error("[process] ffmpeg cut falhou, fallback p/ Series", cutErr);
+        finalVideoUrl = rawVideoUrl;
+        finalSegments = segments;
+      }
+    }
+
     const renderManifest = {
       jobId,
-      videoUrl: rawVideoUrl,
+      videoUrl: finalVideoUrl,
       captions: remappedCaptions,
-      segments,
+      segments: finalSegments,
       durationInFrames: Math.max(1, durationInFrames),
       fps: 30 as const,
       width: 1080,

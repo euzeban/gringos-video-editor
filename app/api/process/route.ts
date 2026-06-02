@@ -64,22 +64,34 @@ export async function POST(req: NextRequest) {
     const FPS = 30;
     const totalDurationMs = Math.round((transcription.duration ?? 0) * 1000);
 
-    // ── FASE 1: corte de silêncio AGRESSIVO (estilo Reels) ──────────────────
-    // Mantém só os trechos com fala; gaps de silêncio > GAP_MS são cortados.
-    // PAD_MS = micro-folga p/ não cortar o ataque/fim da palavra.
-    const GAP_MS = 200;
-    const PAD_MS = 60;
+    // ── FASE 1: corte de silêncio (estilo Reels, mas sem comer palavra) ─────
+    // Passo 1: decide os cortes pelo gap REAL entre palavras (gap > GAP_MS = corta).
+    // Passo 2: SÓ DEPOIS aplica folga PAD_MS nas bordas e funde sobreposições.
+    // (Aplicar folga antes mascarava silêncios curtos e cortava rente demais.)
+    const GAP_MS = 180;  // silêncio acima disso entre palavras é cortado
+    const PAD_MS = 100;  // folga nas bordas do trecho falado (não come a palavra)
     const clampMs = (v: number) => Math.max(0, totalDurationMs ? Math.min(v, totalDurationMs) : v);
 
     type Seg = { startMs: number; endMs: number };
     let segments: Seg[] = [];
     if (captions.length > 0) {
+      // Passo 1 — agrupa por gap REAL (sem padding ainda)
+      const raw: Seg[] = [];
       for (const c of captions) {
-        const s = clampMs(c.startMs - PAD_MS);
-        const e = clampMs(c.endMs + PAD_MS);
+        const last = raw[raw.length - 1];
+        if (last && c.startMs - last.endMs <= GAP_MS) {
+          last.endMs = Math.max(last.endMs, c.endMs);
+        } else {
+          raw.push({ startMs: c.startMs, endMs: c.endMs });
+        }
+      }
+      // Passo 2 — aplica folga nas bordas, clampa e funde o que sobrepôs
+      for (const r of raw) {
+        const s = clampMs(r.startMs - PAD_MS);
+        const e = clampMs(r.endMs + PAD_MS);
         const last = segments[segments.length - 1];
-        if (last && s - last.endMs <= GAP_MS) {
-          last.endMs = Math.max(last.endMs, e); // funde (gap pequeno = mantém)
+        if (last && s <= last.endMs) {
+          last.endMs = Math.max(last.endMs, e);
         } else {
           segments.push({ startMs: s, endMs: e });
         }

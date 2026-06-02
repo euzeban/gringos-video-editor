@@ -61,12 +61,67 @@ export async function POST(req: NextRequest) {
     });
 
     const { captions } = openAiWhisperApiToCaptions({ transcription });
-    const durationInFrames = Math.ceil((transcription.duration ?? 0) * 30);
+    const FPS = 30;
+    const totalDurationMs = Math.round((transcription.duration ?? 0) * 1000);
+
+    // ── FASE 1: corte de silêncio AGRESSIVO (estilo Reels) ──────────────────
+    // Mantém só os trechos com fala; gaps de silêncio > GAP_MS são cortados.
+    // PAD_MS = micro-folga p/ não cortar o ataque/fim da palavra.
+    const GAP_MS = 200;
+    const PAD_MS = 60;
+    const clampMs = (v: number) => Math.max(0, totalDurationMs ? Math.min(v, totalDurationMs) : v);
+
+    type Seg = { startMs: number; endMs: number };
+    let segments: Seg[] = [];
+    if (captions.length > 0) {
+      for (const c of captions) {
+        const s = clampMs(c.startMs - PAD_MS);
+        const e = clampMs(c.endMs + PAD_MS);
+        const last = segments[segments.length - 1];
+        if (last && s - last.endMs <= GAP_MS) {
+          last.endMs = Math.max(last.endMs, e); // funde (gap pequeno = mantém)
+        } else {
+          segments.push({ startMs: s, endMs: e });
+        }
+      }
+    } else {
+      // sem fala detectada → mantém o vídeo inteiro, sem cortes nem legenda
+      segments = [{ startMs: 0, endMs: totalDurationMs }];
+    }
+
+    // ── Remapeia legendas pro timeline COMPRIMIDO (após os cortes) ──────────
+    const offsets: number[] = [];
+    let acc = 0;
+    for (const seg of segments) { offsets.push(acc); acc += seg.endMs - seg.startMs; }
+
+    const remapMs = (t: number): number => {
+      for (let i = 0; i < segments.length; i++) {
+        const seg = segments[i];
+        if (t < seg.startMs) return offsets[i];
+        if (t <= seg.endMs) return offsets[i] + (t - seg.startMs);
+      }
+      return acc;
+    };
+
+    const remappedCaptions = captions.map((c) => ({
+      ...c,
+      startMs: remapMs(c.startMs),
+      endMs: remapMs(c.endMs),
+      timestampMs: c.timestampMs != null ? remapMs(c.timestampMs) : null,
+    }));
+
+    // duração = soma dos frames por segmento (casa exatamente com a composição)
+    const durationInFrames = segments.reduce(
+      (sum, s) => sum + Math.max(1, Math.round((s.endMs / 1000) * FPS) - Math.round((s.startMs / 1000) * FPS)),
+      0,
+    );
+
     const renderManifest = {
       jobId,
       videoUrl: rawVideoUrl,
-      captions,
-      durationInFrames,
+      captions: remappedCaptions,
+      segments,
+      durationInFrames: Math.max(1, durationInFrames),
       fps: 30 as const,
       width: 1080,
       height: 1920,
@@ -76,7 +131,7 @@ export async function POST(req: NextRequest) {
       .from("video_jobs")
       .update({
         status: "review",
-        captions,
+        captions: remappedCaptions,
         render_manifest: renderManifest,
         updated_at: new Date().toISOString(),
       })

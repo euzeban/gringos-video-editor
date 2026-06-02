@@ -72,17 +72,18 @@ export async function POST(req: NextRequest) {
     const PAD_MS = 100;  // folga nas bordas do trecho falado (não come a palavra)
     const clampMs = (v: number) => Math.max(0, totalDurationMs ? Math.min(v, totalDurationMs) : v);
 
-    type Seg = { startMs: number; endMs: number };
+    type Seg = { startMs: number; endMs: number; text: string };
     let segments: Seg[] = [];
     if (captions.length > 0) {
-      // Passo 1 — agrupa por gap REAL (sem padding ainda)
+      // Passo 1 — agrupa por gap REAL (sem padding ainda), carregando o texto
       const raw: Seg[] = [];
       for (const c of captions) {
         const last = raw[raw.length - 1];
         if (last && c.startMs - last.endMs <= GAP_MS) {
           last.endMs = Math.max(last.endMs, c.endMs);
+          last.text = `${last.text} ${c.text}`.trim();
         } else {
-          raw.push({ startMs: c.startMs, endMs: c.endMs });
+          raw.push({ startMs: c.startMs, endMs: c.endMs, text: c.text });
         }
       }
       // Passo 2 — aplica folga nas bordas, clampa e funde o que sobrepôs
@@ -92,13 +93,14 @@ export async function POST(req: NextRequest) {
         const last = segments[segments.length - 1];
         if (last && s <= last.endMs) {
           last.endMs = Math.max(last.endMs, e);
+          last.text = `${last.text} ${r.text}`.trim();
         } else {
-          segments.push({ startMs: s, endMs: e });
+          segments.push({ startMs: s, endMs: e, text: r.text });
         }
       }
     } else {
       // sem fala detectada → mantém o vídeo inteiro, sem cortes nem legenda
-      segments = [{ startMs: 0, endMs: totalDurationMs }];
+      segments = [{ startMs: 0, endMs: totalDurationMs, text: "" }];
     }
 
     // ── Remapeia legendas pro timeline COMPRIMIDO (após os cortes) ──────────
@@ -181,6 +183,10 @@ export async function POST(req: NextRequest) {
       fps: 30 as const,
       width: 1080,
       height: 1920,
+      // ── dados p/ o painel de revisão (re-corte manual) ──
+      rawVideoUrl,
+      rawCaptions: captions,
+      editSegments: segments.map((s) => ({ startMs: s.startMs, endMs: s.endMs, text: s.text })),
     };
 
     await supabase

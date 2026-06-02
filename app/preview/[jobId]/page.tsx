@@ -35,9 +35,9 @@ export default async function PreviewPage({ params }: { params: Promise<{ jobId:
       style={{
         minHeight: "100vh",
         display: "flex",
-        alignItems: "center",
+        alignItems: "flex-start",
         justifyContent: "center",
-        padding: 16,
+        padding: 24,
         background: "#000",
       }}
     >
